@@ -1,0 +1,6 @@
+{
+  "name": "STAN AI",
+  "description": "Independent ~50M-parameter decoder-only Transformer language model built from scratch in PyTorch with custom SentencePiece BPE tokenizer, training pipeline, FastAPI inference service, and React web console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
