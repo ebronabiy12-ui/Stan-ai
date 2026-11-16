@@ -33,6 +33,8 @@ class LoadedModelState:
     training_history: list[dict[str, Any]] = field(default_factory=list)
     warning: Optional[str] = None
     saved_at: Optional[str] = None
+    training_stage: str = "untrained"
+    current_learning_rate: Optional[float] = None
 
     @property
     def production_chat_enabled(self) -> bool:
@@ -80,6 +82,8 @@ def load_stan_runtime(
     max_steps = 0
     dataset_tokens = 0
     saved_at: Optional[str] = None
+    hist_stage = "untrained"
+    hist_lr: Optional[float] = None
 
     if history_file.exists():
         with open(history_file, "r", encoding="utf-8") as fh:
@@ -88,6 +92,8 @@ def load_stan_runtime(
         max_steps = int(parsed_hist.get("max_steps", 0))
         dataset_tokens = int(parsed_hist.get("dataset_tokens", 0))
         saved_at = parsed_hist.get("saved_at")
+        hist_stage = str(parsed_hist.get("training_stage", "untrained"))
+        hist_lr = parsed_hist.get("current_learning_rate")
 
     # Resolve tokenizer if present
     tok_candidate = (
@@ -120,6 +126,8 @@ def load_stan_runtime(
                 "STAN AI has not been trained yet; production chat is disabled."
             ),
             saved_at=saved_at,
+            training_stage=hist_stage,
+            current_learning_rate=hist_lr,
         )
 
     # Peek payload config before building model so architecture matches checkpoint
@@ -132,9 +140,13 @@ def load_stan_runtime(
     model.eval()
 
     training_status = str(payload.get("training_status", "untrained"))
+    training_stage = str(payload.get("training_stage", hist_stage if hist_stage != "untrained" else "pretraining"))
+    current_lr = payload.get("current_learning_rate", hist_lr)
     global_step = int(payload.get("global_step", 0))
     ckpt_version = str(payload.get("checkpoint_version", f"step-{global_step:07d}"))
     ckpt_history = list(payload.get("training_history", history_data))
+    if current_lr is None and ckpt_history:
+        current_lr = ckpt_history[-1].get("learning_rate")
     ckpt_train_cfg = payload.get("training_config") or {}
     max_steps = int(ckpt_train_cfg.get("max_steps", max_steps))
     dataset_tokens = int(payload.get("dataset_tokens", dataset_tokens))
@@ -173,6 +185,8 @@ def load_stan_runtime(
         training_history=ckpt_history,
         warning=warning,
         saved_at=saved_at,
+        training_stage=training_stage,
+        current_learning_rate=current_lr,
     )
 
 

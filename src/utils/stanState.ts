@@ -1,4 +1,9 @@
-import type { GenerationSettings, TrainingMetricPoint } from '../types/stan';
+import type {
+  GenerationSettings,
+  MemoryCategory,
+  PersonalityConfig,
+  TrainingMetricPoint,
+} from '../types/stan';
 
 export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   temperature: 0.8,
@@ -11,6 +16,62 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   apiBaseUrl:
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env
       ?.VITE_STAN_API_URL || '/api/stan',
+};
+
+export const MEMORY_CATEGORIES: MemoryCategory[] = [
+  'identity_personality',
+  'people_relationships',
+  'user_facts',
+  'conversation_history',
+  'project_knowledge',
+  'learned_preferences',
+  'decisions_experiences',
+];
+
+export const MEMORY_CATEGORY_META: Record<
+  MemoryCategory,
+  { label: string; description: string }
+> = {
+  identity_personality: {
+    label: 'Identity & Personality',
+    description: 'Core system identity, non-consciousness boundaries, and temperament principles.',
+  },
+  people_relationships: {
+    label: 'People & Relationships',
+    description: 'Owner, family context (Stan, Kalda), and verified relational facts.',
+  },
+  user_facts: {
+    label: 'User-Provided Facts',
+    description: 'Explicit facts shared by Stan or corrected across conversations.',
+  },
+  conversation_history: {
+    label: 'Conversation History',
+    description: 'Durable episodic turns with stances, registers, and signals.',
+  },
+  project_knowledge: {
+    label: 'Project Knowledge',
+    description: 'STAN AI architecture, Kalda project details, and engineering constraints.',
+  },
+  learned_preferences: {
+    label: 'Learned Preferences',
+    description: 'Communication, formatting, and collaboration preferences over time.',
+  },
+  decisions_experiences: {
+    label: 'Decisions & Experiences',
+    description: 'Recorded conclusions, reassessments, and verified reasoning outcomes.',
+  },
+};
+
+export const DEFAULT_PERSONALITY_CONFIG: PersonalityConfig = {
+  directness: 0.8,
+  independence: 0.9,
+  skepticism: 0.75,
+  humor: 0.45,
+  warmth: 0.55,
+  verbosity: 0.45,
+  allow_disagreement: true,
+  allow_bluntness: true,
+  challenge_bad_assumptions: true,
 };
 
 const PRODUCTION_READY_STATES = new Set(['trained', 'instruction-tuned']);
@@ -45,6 +106,66 @@ export function formatTrainingStatusLabel(status: string): string {
       return 'Smoke Test Only';
     default:
       return status || 'Unknown';
+  }
+}
+
+export function formatStanceLabel(stance: string): string {
+  switch (stance) {
+    case 'answer':
+      return 'Direct Answer';
+    case 'agree':
+      return 'Reasoned Agreement';
+    case 'disagree':
+      return 'Disagreement';
+    case 'challenge':
+      return 'Challenge Assumption';
+    case 'uncertain':
+      return 'Epistemic Uncertainty';
+    case 'reassess':
+      return 'Self-Correction';
+    case 'boundary':
+      return 'Boundary / Pushback';
+    default:
+      return stance || 'Unknown';
+  }
+}
+
+export function formatTrainingStageLabel(stage?: string | null): string {
+  switch (stage) {
+    case 'pretraining':
+      return 'Stage 1: English Pretraining';
+    case 'instruction_tuning':
+      return 'Stage 2: Instruction Tuning (SFT)';
+    case 'smoke_test':
+      return 'Smoke Test (Synthetic Verification)';
+    case 'untrained':
+    case null:
+    case undefined:
+      return 'Untrained (Random / Uninitialized)';
+    default:
+      return stage;
+  }
+}
+
+export function formatLearningRate(lr?: number | null): string {
+  if (typeof lr !== 'number' || !Number.isFinite(lr) || lr <= 0) return '—';
+  return lr.toExponential(2);
+}
+
+export function formatRegisterLabel(register: string): string {
+  switch (register) {
+    case 'direct':
+      return 'Direct';
+    case 'serious':
+      return 'Serious';
+    case 'gentle':
+      return 'Gentle';
+    case 'blunt':
+      return 'Blunt';
+    case 'humorous':
+      return 'Dry Humor';
+    default:
+      return register || 'Direct';
   }
 }
 
@@ -101,6 +222,33 @@ export function clampGenerationSettings(input: Partial<GenerationSettings>): Gen
         ? input.stop_on_eos
         : DEFAULT_GENERATION_SETTINGS.stop_on_eos,
     apiBaseUrl: baseUrl,
+  };
+}
+
+export function clampPersonalityConfig(input: Partial<PersonalityConfig>): PersonalityConfig {
+  const clamp01 = (val: unknown, fallback: number) => {
+    const n = typeof val === 'number' && Number.isFinite(val) ? val : fallback;
+    return Number(Math.min(1, Math.max(0, n)).toFixed(2));
+  };
+  const boolVal = (val: unknown, fallback: boolean) =>
+    typeof val === 'boolean' ? val : fallback;
+
+  return {
+    directness: clamp01(input.directness, DEFAULT_PERSONALITY_CONFIG.directness),
+    independence: clamp01(input.independence, DEFAULT_PERSONALITY_CONFIG.independence),
+    skepticism: clamp01(input.skepticism, DEFAULT_PERSONALITY_CONFIG.skepticism),
+    humor: clamp01(input.humor, DEFAULT_PERSONALITY_CONFIG.humor),
+    warmth: clamp01(input.warmth, DEFAULT_PERSONALITY_CONFIG.warmth),
+    verbosity: clamp01(input.verbosity, DEFAULT_PERSONALITY_CONFIG.verbosity),
+    allow_disagreement: boolVal(
+      input.allow_disagreement,
+      DEFAULT_PERSONALITY_CONFIG.allow_disagreement,
+    ),
+    allow_bluntness: boolVal(input.allow_bluntness, DEFAULT_PERSONALITY_CONFIG.allow_bluntness),
+    challenge_bad_assumptions: boolVal(
+      input.challenge_bad_assumptions,
+      DEFAULT_PERSONALITY_CONFIG.challenge_bad_assumptions,
+    ),
   };
 }
 

@@ -20,6 +20,7 @@ class GenerationConfig:
     repetition_penalty: float = 1.1
     seed: Optional[int] = None
     stop_on_eos: bool = True
+    stop_sequences: tuple[str, ...] = ()
 
 
 @dataclass
@@ -147,6 +148,16 @@ def stream_generate_text(
         context_ids.append(next_id)
 
         decoded_so_far = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        hit_stop_seq = False
+        if config.stop_sequences:
+            for seq in config.stop_sequences:
+                idx = decoded_so_far.find(seq)
+                if idx != -1:
+                    decoded_so_far = decoded_so_far[:idx].rstrip()
+                    stopped_reason = f"stop_sequence:{seq}"
+                    hit_stop_seq = True
+                    break
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
         yield {
             "event": "token",
@@ -155,9 +166,17 @@ def stream_generate_text(
             "generated_tokens": len(generated_ids),
             "elapsed_ms": round(elapsed_ms, 2),
         }
+        if hit_stop_seq:
+            break
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
     final_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    if config.stop_sequences:
+        for seq in config.stop_sequences:
+            idx = final_text.find(seq)
+            if idx != -1:
+                final_text = final_text[:idx].rstrip()
+                break
     tps = (len(generated_ids) / max(elapsed_ms / 1000.0, 1e-6)) if generated_ids else 0.0
     yield {
         "event": "done",

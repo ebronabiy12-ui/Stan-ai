@@ -89,7 +89,9 @@ async function ensurePythonService(): Promise<void> {
 }
 
 async function proxyToStan(req: Request, res: Response, targetPath: string): Promise<void> {
-  const url = `${STAN_API_URL}${targetPath}`;
+  const qsIndex = req.originalUrl.indexOf('?');
+  const queryString = qsIndex >= 0 ? req.originalUrl.slice(qsIndex) : '';
+  const url = `${STAN_API_URL}${targetPath}${queryString}`;
   const isStream = targetPath === '/generate/stream';
 
   try {
@@ -156,6 +158,28 @@ async function createServer(): Promise<void> {
   app.post('/api/stan/tokenize', (req, res) => void proxyToStan(req, res, '/tokenize'));
   app.post('/api/stan/generate', (req, res) => void proxyToStan(req, res, '/generate'));
   app.post('/api/stan/generate/stream', (req, res) => void proxyToStan(req, res, '/generate/stream'));
+
+  // Identity, Persistent Memory & Reasoning routes
+  app.get('/api/stan/identity', (req, res) => void proxyToStan(req, res, '/identity'));
+  app.put('/api/stan/identity', (req, res) => void proxyToStan(req, res, '/identity'));
+  app.get('/api/stan/memory', (req, res) => void proxyToStan(req, res, '/memory'));
+  app.post('/api/stan/memory', (req, res) => void proxyToStan(req, res, '/memory'));
+  app.post('/api/stan/memory/search', (req, res) => void proxyToStan(req, res, '/memory/search'));
+  app.patch('/api/stan/memory/:recordId', (req, res) =>
+    void proxyToStan(req, res, `/memory/${encodeURIComponent(req.params.recordId)}`),
+  );
+  app.delete('/api/stan/memory/:recordId', (req, res) =>
+    void proxyToStan(req, res, `/memory/${encodeURIComponent(req.params.recordId)}`),
+  );
+  app.post('/api/stan/reason', (req, res) => void proxyToStan(req, res, '/reason'));
+
+  // Phase 2 Training Infrastructure & 9-Dimension Evaluation routes
+  app.get('/api/stan/training/status', (req, res) => void proxyToStan(req, res, '/training/status'));
+  app.post('/api/stan/training/start', (req, res) => void proxyToStan(req, res, '/training/start'));
+  app.post('/api/stan/training/stop', (req, res) => void proxyToStan(req, res, '/training/stop'));
+  app.post('/api/stan/training/import', (req, res) => void proxyToStan(req, res, '/training/import'));
+  app.get('/api/stan/evaluation', (req, res) => void proxyToStan(req, res, '/evaluation'));
+  app.post('/api/stan/evaluation/run', (req, res) => void proxyToStan(req, res, '/evaluation/run'));
 
   if (!IS_PROD) {
     const { createServer: createViteServer } = await import('vite');

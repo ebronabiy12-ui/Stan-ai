@@ -1,10 +1,17 @@
 import type {
+  EvaluationReport,
   GenerateResult,
   GenerationSettings,
   HealthInfo,
+  IdentityProfile,
+  MemoryListResponse,
+  MemoryRecord,
   MetricsInfo,
   ModelInfo,
+  PersonalityConfig,
+  ReasonResponse,
   TokenizeResult,
+  TrainingJobStatus,
 } from '../types/stan';
 
 async function parseErrorDetail(res: Response): Promise<string> {
@@ -54,6 +61,135 @@ export async function tokenizeText(
   });
   if (!res.ok) throw new Error(await parseErrorDetail(res));
   return (await res.json()) as TokenizeResult;
+}
+
+export async function fetchIdentity(baseUrl: string): Promise<IdentityProfile> {
+  const res = await fetch(`${baseUrl}/identity`);
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as IdentityProfile;
+}
+
+export async function updateIdentity(
+  baseUrl: string,
+  payload: { personality?: PersonalityConfig; core_principles?: string[] },
+): Promise<IdentityProfile> {
+  const res = await fetch(`${baseUrl}/identity`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as IdentityProfile;
+}
+
+export async function fetchMemories(
+  baseUrl: string,
+  category?: string,
+  limit = 100,
+): Promise<MemoryListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (category && category !== 'all') {
+    params.set('category', category);
+  }
+  const res = await fetch(`${baseUrl}/memory?${params.toString()}`);
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as MemoryListResponse;
+}
+
+export async function createMemory(
+  baseUrl: string,
+  payload: {
+    category: string;
+    subject: string;
+    content: string;
+    source?: string;
+    confidence?: number;
+    pinned?: boolean;
+  },
+): Promise<MemoryRecord> {
+  const res = await fetch(`${baseUrl}/memory`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as MemoryRecord;
+}
+
+export async function updateMemory(
+  baseUrl: string,
+  recordId: string,
+  payload: {
+    category?: string;
+    subject?: string;
+    content?: string;
+    confidence?: number;
+    pinned?: boolean;
+  },
+): Promise<MemoryRecord> {
+  const res = await fetch(`${baseUrl}/memory/${encodeURIComponent(recordId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as MemoryRecord;
+}
+
+export async function deleteMemory(
+  baseUrl: string,
+  recordId: string,
+): Promise<{ deleted: boolean; id: string }> {
+  const res = await fetch(`${baseUrl}/memory/${encodeURIComponent(recordId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as { deleted: boolean; id: string };
+}
+
+export async function searchMemories(
+  baseUrl: string,
+  query: string,
+  categories?: string[],
+  topK = 12,
+): Promise<{ query: string; count: number; records: MemoryRecord[] }> {
+  const res = await fetch(`${baseUrl}/memory/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      categories: categories && categories.length > 0 ? categories : null,
+      top_k: topK,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as { query: string; count: number; records: MemoryRecord[] };
+}
+
+export async function runReasoning(
+  baseUrl: string,
+  message: string,
+  settings: GenerationSettings,
+  persistTurn = true,
+  signal?: AbortSignal,
+): Promise<ReasonResponse> {
+  const res = await fetch(`${baseUrl}/reason`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      temperature: settings.temperature,
+      top_k: settings.top_k,
+      top_p: settings.top_p,
+      max_new_tokens: settings.max_new_tokens,
+      repetition_penalty: settings.repetition_penalty,
+      seed: settings.seed,
+      persist_turn: persistTurn,
+    }),
+    signal,
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as ReasonResponse;
 }
 
 export interface StreamEventChunk {
@@ -138,3 +274,93 @@ export async function streamGenerate(
     }
   }
 }
+
+export async function fetchTrainingStatus(baseUrl: string): Promise<{
+  training_status: string;
+  training_stage: string;
+  hardware: import('../types/stan').HardwareInfo;
+  job: TrainingJobStatus;
+  checkpoint_history: import('../types/stan').CheckpointRecord[];
+}> {
+  const res = await fetch(`${baseUrl}/training/status`);
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as {
+    training_status: string;
+    training_stage: string;
+    hardware: import('../types/stan').HardwareInfo;
+    job: TrainingJobStatus;
+    checkpoint_history: import('../types/stan').CheckpointRecord[];
+  };
+}
+
+export async function startTrainingJob(
+  baseUrl: string,
+  payload: {
+    stage: 'smoke_test' | 'pretraining' | 'instruction_tuning';
+    resume?: boolean;
+    overwrite_existing?: boolean;
+    max_steps?: number;
+  },
+): Promise<TrainingJobStatus> {
+  const res = await fetch(`${baseUrl}/training/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as TrainingJobStatus;
+}
+
+export async function stopTrainingJob(baseUrl: string): Promise<TrainingJobStatus> {
+  const res = await fetch(`${baseUrl}/training/stop`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as TrainingJobStatus;
+}
+
+export async function importCheckpointFile(
+  baseUrl: string,
+  payload: {
+    source_checkpoint: string;
+    tokenizer_source?: string | null;
+    confirm_overwrite: boolean;
+  },
+): Promise<{
+  imported: boolean;
+  target_checkpoint: string;
+  global_step?: number | null;
+  training_status?: string | null;
+  training_stage?: string | null;
+  checkpoint_version?: string | null;
+}> {
+  const res = await fetch(`${baseUrl}/training/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as {
+    imported: boolean;
+    target_checkpoint: string;
+    global_step?: number | null;
+    training_status?: string | null;
+    training_stage?: string | null;
+    checkpoint_version?: string | null;
+  };
+}
+
+export async function fetchEvaluationReport(baseUrl: string): Promise<EvaluationReport> {
+  const res = await fetch(`${baseUrl}/evaluation`);
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as EvaluationReport;
+}
+
+export async function runEvaluationSuite(baseUrl: string): Promise<EvaluationReport> {
+  const res = await fetch(`${baseUrl}/evaluation/run`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(await parseErrorDetail(res));
+  return (await res.json()) as EvaluationReport;
+}
+

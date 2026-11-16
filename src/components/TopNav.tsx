@@ -1,6 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 
-export type NavTab = 'chat' | 'model' | 'training' | 'settings';
+export type NavTab = 'chat' | 'cognitive' | 'model' | 'training' | 'settings';
 
 interface TopNavProps {
   activeTab: NavTab;
@@ -11,6 +11,7 @@ interface TopNavProps {
 
 const NAV_ITEMS: Array<{ id: NavTab; label: string }> = [
   { id: 'chat', label: 'Chat' },
+  { id: 'cognitive', label: 'Memory & Identity' },
   { id: 'model', label: 'Model Info' },
   { id: 'training', label: 'Training' },
   { id: 'settings', label: 'Settings' },
@@ -18,8 +19,8 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string }> = [
 
 export function TopNav({ activeTab, onSelectTab, onRefresh, refreshing }: TopNavProps) {
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-8 px-4 py-3 sm:px-6">
+    <header className="md:sticky md:top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-4 py-3 sm:px-6">
         <a
           href="#chat"
           onClick={(e) => {
@@ -71,10 +72,10 @@ export function TopNav({ activeTab, onSelectTab, onRefresh, refreshing }: TopNav
         </div>
       </div>
 
-      {/* Compact single-row mobile navigation */}
+      {/* Compact mobile navigation */}
       <nav
         aria-label="Mobile navigation"
-        className="flex md:hidden items-center justify-between border-t border-slate-100 px-4 py-1.5 overflow-x-auto gap-2"
+        className="flex md:hidden flex-wrap items-center gap-1 border-t border-slate-100 px-3 py-1.5"
       >
         {NAV_ITEMS.map((item) => {
           const active = activeTab === item.id;
@@ -84,7 +85,7 @@ export function TopNav({ activeTab, onSelectTab, onRefresh, refreshing }: TopNav
               type="button"
               onClick={() => onSelectTab(item.id)}
               aria-current={active ? 'page' : undefined}
-              className={`min-h-[40px] px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`min-h-[36px] px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 active
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-slate-600 hover:text-slate-900'

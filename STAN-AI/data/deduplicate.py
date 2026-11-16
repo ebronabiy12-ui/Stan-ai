@@ -37,23 +37,33 @@ def near_deduplicate(
 ) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
     kept_shingles: list[set[str]] = []
+    shingle_index: dict[str, list[int]] = {}
 
     for rec in records:
         shingles = _word_shingles(rec["text"], k=shingle_k)
         if not shingles:
             continue
+
+        overlap_counts: dict[int, int] = {}
+        for sh in shingles:
+            for doc_idx in shingle_index.get(sh, ()):
+                overlap_counts[doc_idx] = overlap_counts.get(doc_idx, 0) + 1
+
         is_dup = False
-        for existing in kept_shingles:
-            inter = len(shingles & existing)
-            if inter == 0:
-                continue
-            union = len(shingles | existing)
-            if inter / union >= jaccard_threshold:
+        sh_len = len(shingles)
+        for doc_idx, inter in overlap_counts.items():
+            other_len = len(kept_shingles[doc_idx])
+            union = sh_len + other_len - inter
+            if union > 0 and (inter / union) >= jaccard_threshold:
                 is_dup = True
                 break
+
         if not is_dup:
+            new_idx = len(kept)
             kept.append(rec)
             kept_shingles.append(shingles)
+            for sh in shingles:
+                shingle_index.setdefault(sh, []).append(new_idx)
     return kept
 
 

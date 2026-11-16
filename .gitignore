@@ -13,3 +13,5 @@ __pycache__/
 .playwright-cli/
 STAN-AI/data/raw/
 STAN-AI/data/processed/
+STAN-AI/memory_store/*.db
+STAN-AI/memory_store/*.sqlite*

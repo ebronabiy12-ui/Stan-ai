@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -15,7 +16,12 @@ import yaml
 from data.dataset import PackedTokenDataset
 from model.config import STANConfig
 from model.transformer import STANTransformer
-from training.checkpoint import load_checkpoint, resolve_latest_checkpoint, save_checkpoint
+from training.checkpoint import (
+    load_checkpoint,
+    resolve_latest_checkpoint,
+    save_checkpoint,
+    validate_checkpoint_overwrite,
+)
 from training.evaluate import evaluate_model
 from training.optimizer import create_adamw_optimizer
 from training.scheduler import create_cosine_warmup_scheduler
@@ -65,21 +71,59 @@ def set_reproducible_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _assert_data_purity(train_config: TrainingConfig) -> None:
+    """Strictly forbid mixing synthetic smoke-test data into genuine English pretraining."""
+    if train_config.training_status_on_complete == "smoke_test":
+        return
+
+    train_path = Path(train_config.train_data_path)
+    if "smoke" in train_path.name.lower():
+        raise ValueError(
+            f"Refusing genuine training on synthetic smoke-test data file: {train_path}"
+        )
+
+    meta_file = train_path.parent / "dataset_metadata.json"
+    if meta_file.exists():
+        with open(meta_file, "r", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        if meta.get("is_smoke_test", False):
+            raise ValueError(
+                f"Dataset metadata at {meta_file} is marked is_smoke_test=True. "
+                "Never mix synthetic smoke-test data with genuine pretraining."
+            )
+
+
 def run_training(
     model_config: STANConfig,
     train_config: TrainingConfig,
     resume_from: Optional[str | Path] = None,
     device_override: Optional[str] = None,
+    overwrite_existing: bool = True,
+    stop_event: Optional[threading.Event] = None,
+    training_stage: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Execute STAN AI autoregressive next-token training loop with:
+    - Strictly separated genuine English corpus vs. synthetic smoke test
     - AdamW + cosine warmup/decay
     - Gradient accumulation + gradient clipping
     - Optional CUDA mixed precision
     - Periodic validation evaluation
-    - Resumable checkpoint persistence
+    - Graceful stop + resumable checkpoint persistence
     """
     set_reproducible_seed(train_config.seed)
+    _assert_data_purity(train_config)
+    validate_checkpoint_overwrite(
+        train_config.checkpoint_dir,
+        overwrite_existing=overwrite_existing,
+        resume_from=resume_from,
+    )
+
+    resolved_stage = training_stage or (
+        "smoke_test"
+        if train_config.training_status_on_complete == "smoke_test"
+        else "pretraining"
+    )
 
     if device_override:
         device = torch.device(device_override)
@@ -151,8 +195,32 @@ def run_training(
     global_step = start_step
     last_train_loss: Optional[float] = None
     last_val_loss: Optional[float] = None
+    last_lr: Optional[float] = (
+        history[-1].get("learning_rate") if history else train_config.learning_rate
+    )
+    stopped_early = False
 
     while global_step < train_config.max_steps:
+        if stop_event is not None and stop_event.is_set():
+            stopped_early = True
+            save_checkpoint(
+                checkpoint_dir=train_config.checkpoint_dir,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                global_step=global_step,
+                model_config=model_config,
+                training_config=train_config.to_dict(),
+                training_history=history,
+                training_status="smoke_test" if resolved_stage == "smoke_test" else "training",
+                tokenizer_path=train_config.tokenizer_path,
+                dataset_tokens=dataset_tokens,
+                training_stage=resolved_stage,
+                current_learning_rate=last_lr,
+            )
+            break
+
         optimizer.zero_grad(set_to_none=True)
         accum_loss = 0.0
 
@@ -188,6 +256,7 @@ def run_training(
             optimizer.step()
 
         lr = scheduler.step()
+        last_lr = lr
         global_step += 1
         last_train_loss = accum_loss
 
@@ -221,7 +290,7 @@ def run_training(
             status = (
                 train_config.training_status_on_complete
                 if global_step >= train_config.max_steps
-                else "training"
+                else ("smoke_test" if resolved_stage == "smoke_test" else "training")
             )
             save_checkpoint(
                 checkpoint_dir=train_config.checkpoint_dir,
@@ -236,16 +305,26 @@ def run_training(
                 training_status=status,
                 tokenizer_path=train_config.tokenizer_path,
                 dataset_tokens=dataset_tokens,
+                training_stage=resolved_stage,
+                current_learning_rate=lr,
             )
 
+    final_status = (
+        train_config.training_status_on_complete
+        if global_step >= train_config.max_steps
+        else ("smoke_test" if resolved_stage == "smoke_test" else "training")
+    )
     return {
         "global_step": global_step,
         "final_train_loss": last_train_loss,
         "final_val_loss": last_val_loss,
+        "current_learning_rate": last_lr,
         "dataset_tokens": dataset_tokens,
         "checkpoint_dir": train_config.checkpoint_dir,
         "history": history,
-        "status": train_config.training_status_on_complete if global_step >= train_config.max_steps else "training",
+        "status": final_status,
+        "training_stage": resolved_stage,
+        "stopped_early": stopped_early,
     }
 
 
@@ -256,6 +335,7 @@ def main() -> None:
     parser.add_argument("--resume", default=None, help="Path to checkpoint .pt or 'auto'.")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--overwrite", action="store_true", help="Confirm replacing existing checkpoints.")
     args = parser.parse_args()
 
     model_cfg = STANConfig.from_yaml(args.model_config)
@@ -268,6 +348,7 @@ def main() -> None:
         train_config=train_cfg,
         resume_from=args.resume,
         device_override=args.device,
+        overwrite_existing=args.overwrite,
     )
     print(json.dumps({k: v for k, v in summary.items() if k != "history"}, indent=2))
 

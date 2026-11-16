@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchHealth, fetchMetrics, fetchModelInfo } from './api/stanClient';
+import { fetchHealth, fetchIdentity, fetchMetrics, fetchModelInfo } from './api/stanClient';
 import { ChatView } from './components/ChatView';
+import { CognitiveWorkspaceView } from './components/CognitiveWorkspaceView';
 import { ModelInfoView } from './components/ModelInfoView';
 import { SettingsView } from './components/SettingsView';
 import { TopNav, type NavTab } from './components/TopNav';
 import { TrainingView } from './components/TrainingView';
-import type { GenerationSettings, HealthInfo, MetricsInfo, ModelInfo } from './types/stan';
+import type {
+  GenerationSettings,
+  HealthInfo,
+  IdentityProfile,
+  MetricsInfo,
+  ModelInfo,
+} from './types/stan';
 import { clampGenerationSettings, DEFAULT_GENERATION_SETTINGS } from './utils/stanState';
 
 const SETTINGS_STORAGE_KEY = 'stan_ai_settings_v1';
@@ -26,6 +33,7 @@ export default function App() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [metrics, setMetrics] = useState<MetricsInfo | null>(null);
+  const [identity, setIdentity] = useState<IdentityProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [backendError, setBackendError] = useState<string | null>(null);
 
@@ -33,14 +41,16 @@ export default function App() {
     setLoading(true);
     setBackendError(null);
     try {
-      const [h, info, met] = await Promise.all([
+      const [h, info, met, ident] = await Promise.all([
         fetchHealth(settings.apiBaseUrl),
         fetchModelInfo(settings.apiBaseUrl),
         fetchMetrics(settings.apiBaseUrl),
+        fetchIdentity(settings.apiBaseUrl),
       ]);
       setHealth(h);
       setModelInfo(info);
       setMetrics(met);
+      setIdentity(ident);
       setLoading(false);
     } catch (err) {
       if (allowRetry) {
@@ -97,10 +107,18 @@ export default function App() {
           <ChatView
             health={health}
             modelInfo={modelInfo}
+            identity={identity}
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             onNavigateTab={setActiveTab}
             backendError={backendError}
+          />
+        )}
+        {activeTab === 'cognitive' && (
+          <CognitiveWorkspaceView
+            apiBaseUrl={settings.apiBaseUrl}
+            identity={identity}
+            onIdentityUpdated={setIdentity}
           />
         )}
         {activeTab === 'model' && (
@@ -111,7 +129,12 @@ export default function App() {
           />
         )}
         {activeTab === 'training' && (
-          <TrainingView metrics={metrics} loading={loading} />
+          <TrainingView
+            metrics={metrics}
+            loading={loading}
+            apiBaseUrl={settings.apiBaseUrl}
+            onRefresh={() => syncRuntime(false)}
+          />
         )}
         {activeTab === 'settings' && (
           <SettingsView
@@ -124,8 +147,8 @@ export default function App() {
 
       <footer className="border-t border-slate-200 bg-white py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 sm:px-6 text-xs text-slate-500">
-          <span>STAN AI · Independent Decoder-Only Transformer</span>
-          <span>PyTorch + SentencePiece BPE + FastAPI</span>
+          <span>STAN AI · Independent 51.66M Decoder-Only Transformer</span>
+          <span>PyTorch + SentencePiece BPE + Persistent Memory + Reasoning Engine</span>
         </div>
       </footer>
     </div>

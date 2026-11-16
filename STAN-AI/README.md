@@ -34,14 +34,18 @@ STAN-AI/
   data/             # License-verified downloader, cleaner, deduplicator, binary dataset packer
   training/         # AdamW, cosine warmup scheduler, atomic checkpoints, eval, resumable trainer
   inference/        # Checkpoint loader, temperature/top-k/top-p/repetition-penalty/streaming engine
-  backend/          # FastAPI app (/health, /model/info, /generate, /generate/stream, /tokenize, /metrics)
+  backend/          # FastAPI app (/health, /model/info, /generate, /tokenize, /metrics, /identity, /memory, /reason)
+  identity/         # Permanent IdentityProfile (STAN AI, Stan, Kalda) & owner-configurable PersonalityConfig
+  memory/           # SQLite 7-category Persistent MemoryStore (CRUD + search + contradiction anchors)
+  reasoning/        # STANReasoningEngine (input signals, contradiction checks, epistemic separation, judgment)
   configs/          # model.yaml and training.yaml
   scripts/          # prepare_corpus.py, kaggle_train.py, run_smoke_train.py, start_inference.sh
   checkpoints/      # Runtime model checkpoints, tokenizer.model, training_history.json
-  tests/            # Pytest suite covering model, tokenizer, data, training, inference, and API
+  memory_store/     # Persistent identity.json and stan_memory.db
+  tests/            # Pytest suite covering model, tokenizer, data, training, inference, memory, reasoning & API
   requirements.txt
   LICENSE
-src/                # React + TypeScript web application (Chat, Model Info, Training, Settings)
+src/                # React + TypeScript web application (Chat, Memory & Identity, Model Info, Training, Settings)
 server.ts           # Node.js Express runtime serving Vite/React and proxying /api/stan/* to FastAPI
 ```
 
@@ -64,26 +68,33 @@ python STAN-AI/scripts/run_smoke_train.py --steps 40
 
 ---
 
-## 4. Kaggle & GPU Training Instructions
+## 4. Phase 2 Training & Notebook Workflow (Colab / Kaggle GPU)
 
-1. Upload or clone the repository into a Kaggle Notebook with GPU enabled (e.g., T4 / P100).
+A turnkey Jupyter notebook is provided at `STAN-AI/notebooks/STAN_AI_Colab_Kaggle_Training.ipynb` alongside `STAN-AI/scripts/colab_kaggle_setup.sh`.
+
+1. Open the notebook or upload the repository into Google Colab / Kaggle with a CUDA GPU enabled (e.g., T4 / L4 / P100).
 2. Install Python dependencies:
    ```bash
-   pip install -r STAN-AI/requirements.txt
+   bash STAN-AI/scripts/colab_kaggle_setup.sh
    ```
-3. Prepare the English corpus and train the 8192-vocab BPE tokenizer:
+3. **Stage 1 — English Pretraining** (random initialization, next-token prediction):
    ```bash
-   python STAN-AI/scripts/prepare_corpus.py --sources-limit 5 --vocab-size 8192
+   python STAN-AI/scripts/prepare_corpus.py --sources-limit 10 --vocab-size 8192
+   python STAN-AI/scripts/kaggle_train.py --stage pretraining --resume auto
    ```
-4. Start training with automatic checkpoint resume (safe across Kaggle 9–12 hour session limits):
+4. **Stage 2 — Instruction Tuning (SFT)** (requires completed Stage 1 checkpoint; uses Apache-2.0 `OpenAssistant/oasst1`):
    ```bash
-   python STAN-AI/scripts/kaggle_train.py --resume auto
+   python STAN-AI/scripts/prepare_sft_corpus.py --max-examples 8000
+   python STAN-AI/scripts/kaggle_train.py --stage instruction_tuning --resume auto
    ```
-5. Save `STAN-AI/checkpoints/latest.pt`, `tokenizer.model`, `tokenizer_config.json`, `model_config.yaml`, and `training_history.json` into Kaggle Output/Dataset storage, then pass `--resume auto` on the next session to restore model weights, AdamW state, LR scheduler state, AMP scaler state, and `global_step`.
+5. **Validate & Import GPU Checkpoints Back Locally**:
+   ```bash
+   python STAN-AI/scripts/import_checkpoint.py --source /path/to/latest.pt --tokenizer /path/to/tokenizer.model --confirm-overwrite
+   ```
 
 ---
 
-## 5. Inference & Deployment
+## 5. Inference, Identity, Memory, Evaluation & Deployment
 
 ### FastAPI Service (Python)
 
@@ -91,32 +102,37 @@ python STAN-AI/scripts/run_smoke_train.py --steps 40
 ./STAN-AI/scripts/start_inference.sh
 ```
 
-Required endpoints:
-- `GET /health`
-- `GET /model/info`
-- `POST /generate` (and `POST /generate/stream` for SSE streaming)
-- `POST /tokenize`
-- `GET /metrics`
+Core, Cognitive, Training & Evaluation Endpoints:
+- `GET /health`, `GET /model/info`, `POST /tokenize`, `GET /metrics`
+- `POST /generate` & `POST /generate/stream` (gated when model weights are `untrained` or `smoke_test`)
+- `GET /identity` & `PUT /identity` (permanent identity anchor & owner-configurable personality)
+- `GET /memory`, `POST /memory`, `PATCH /memory/{id}`, `DELETE /memory/{id}`, `POST /memory/search` (7-category SQLite persistent memory)
+- `POST /reason` (Stage 3 personality-conditioned neural generation + cognitive reasoning engine)
+- `GET /training/status`, `POST /training/start`, `POST /training/stop`, `POST /training/import`
+- `GET /evaluation`, `POST /evaluation/run` (9-dimension measured evaluation suite)
 
 ### Full-Stack Web App (Node.js + React)
 
 ```bash
 npm install
 npm run build
-STAN_API_URL="http://127.0.0.1:8000" npm start
+STAN_API_URL="http://127.0.0.1:8001" npm start
 ```
 
-In development, `npm run dev` runs `server.ts` on port `3000`, mounts Vite middleware, and proxies `/api/stan/*` to the Python FastAPI service (auto-spawning local `uvicorn` if `.venv` is present).
+In development, `npm run dev` runs `server.ts` on port `3000`, mounts Vite middleware, and proxies `/api/stan/*` to the Python FastAPI service (auto-spawning local `uvicorn` on `127.0.0.1:8001` if `.venv` is present).
 
-When no trained English checkpoint exists in `STAN-AI/checkpoints/`, STAN AI honestly reports `training_status: "untrained"` and disables production chat.
+When no trained English checkpoint exists in `STAN-AI/checkpoints/`, STAN AI honestly reports `training_status: "untrained"`, keeps raw neural generation disabled, and transparently reports `neural_generation_used: false` in reasoning and `not_evaluated_untrained` for neural evaluation categories.
 
 ---
 
 ## 6. Automated Verification
 
 ```bash
-# Python unit & integration tests (model, tokenizer, data, training, inference, FastAPI)
+# Python unit & integration tests (model, tokenizer, data, Stage 1/2/3 training, evaluation, memory, reasoning & API)
 .venv/bin/pytest -v STAN-AI/tests/
+
+# 9-dimension evaluation CLI check
+.venv/bin/python STAN-AI/scripts/run_evaluation.py
 
 # Frontend/Node logic tests
 npx --yes tsx --test src/utils/stanState.test.ts
@@ -124,3 +140,4 @@ npx --yes tsx --test src/utils/stanState.test.ts
 # TypeScript & production build check
 npm run lint && npm run build
 ```
+

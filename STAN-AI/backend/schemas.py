@@ -101,6 +101,8 @@ class TrainingMetricPoint(BaseModel):
 
 class MetricsResponse(BaseModel):
     training_status: str
+    training_stage: str = "untrained"
+    current_learning_rate: Optional[float] = None
     global_step: int
     max_steps: int
     progress_percent: float
@@ -112,4 +114,126 @@ class MetricsResponse(BaseModel):
     saved_at: Optional[str]
     history: list[TrainingMetricPoint]
     warning: Optional[str]
+    gpu_info: dict[str, Any] = Field(default_factory=dict)
+    checkpoint_history: list[dict[str, Any]] = Field(default_factory=list)
+    active_job: dict[str, Any] = Field(default_factory=dict)
     extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class PersonalityConfigSchema(BaseModel):
+    directness: float = Field(0.80, ge=0.0, le=1.0)
+    independence: float = Field(0.90, ge=0.0, le=1.0)
+    skepticism: float = Field(0.75, ge=0.0, le=1.0)
+    humor: float = Field(0.45, ge=0.0, le=1.0)
+    warmth: float = Field(0.55, ge=0.0, le=1.0)
+    verbosity: float = Field(0.45, ge=0.0, le=1.0)
+    allow_disagreement: bool = True
+    allow_bluntness: bool = True
+    challenge_bad_assumptions: bool = True
+
+
+class IdentityResponse(BaseModel):
+    name: str
+    owner_name: str
+    owner_relationship: str
+    project_name: str
+    system_nature: str
+    core_principles: list[str]
+    personality: PersonalityConfigSchema
+    updated_at: str
+
+
+class IdentityUpdateRequest(BaseModel):
+    personality: Optional[PersonalityConfigSchema] = None
+    core_principles: Optional[list[str]] = None
+
+
+class MemoryRecordSchema(BaseModel):
+    id: str
+    category: str
+    subject: str
+    content: str
+    source: str
+    confidence: float
+    pinned: bool
+    created_at: str
+    updated_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryCreateRequest(BaseModel):
+    category: str
+    subject: str = Field(..., min_length=1, max_length=256)
+    content: str = Field(..., min_length=1, max_length=8192)
+    source: str = "owner_entry"
+    confidence: float = Field(0.95, ge=0.0, le=1.0)
+    pinned: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryUpdateRequest(BaseModel):
+    category: Optional[str] = None
+    subject: Optional[str] = Field(None, min_length=1, max_length=256)
+    content: Optional[str] = Field(None, min_length=1, max_length=8192)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    pinned: Optional[bool] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+class MemoryListResponse(BaseModel):
+    categories: list[str]
+    counts: dict[str, int]
+    records: list[MemoryRecordSchema]
+
+
+class MemorySearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=1024)
+    categories: Optional[list[str]] = None
+    top_k: int = Field(8, ge=1, le=50)
+
+
+class ReasonRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=8192)
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    top_k: int = Field(40, ge=0, le=8192)
+    top_p: float = Field(0.9, gt=0.0, le=1.0)
+    max_new_tokens: int = Field(128, ge=1, le=512)
+    repetition_penalty: float = Field(1.15, ge=1.0, le=2.0)
+    seed: Optional[int] = Field(None, ge=0)
+    persist_turn: bool = True
+
+    @field_validator("message")
+    @classmethod
+    def message_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Message must not be empty or whitespace only.")
+        return v
+
+
+class ReasonResponse(BaseModel):
+    user_message: str
+    response: str
+    stance: str
+    register: str
+    detected_signals: list[str]
+    reasoning_steps: list[str]
+    facts: list[str]
+    opinions: list[str]
+    uncertainties: list[str]
+    contradictions_found: list[str]
+    retrieved_memories: list[dict[str, Any]]
+    memory_updates: list[dict[str, Any]]
+    provenance: dict[str, Any]
+
+
+class TrainingStartRequest(BaseModel):
+    stage: str = Field(..., pattern="^(smoke_test|pretraining|instruction_tuning)$")
+    resume: bool = False
+    overwrite_existing: bool = False
+    max_steps: Optional[int] = Field(None, ge=1, le=500000)
+
+
+class CheckpointImportRequest(BaseModel):
+    source_checkpoint: str = Field(..., min_length=1, max_length=1024)
+    tokenizer_source: Optional[str] = Field(None, max_length=1024)
+    confirm_overwrite: bool = False
